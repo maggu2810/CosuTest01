@@ -1,6 +1,5 @@
 package de.maggu2810.playground.android.cosutest01;
 
-import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.admin.DevicePolicyManager;
 import android.app.admin.SystemUpdatePolicy;
@@ -13,9 +12,10 @@ import android.os.Bundle;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.View;
 import android.widget.Toast;
 
-public class MainActivity extends Activity {
+public class MainActivity extends VerboseActivity {
 
     private static final String TAG = "CosuTest01";
 
@@ -24,76 +24,50 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        Log.d(TAG, "onCreate: ...");
         super.onCreate(savedInstanceState);
-
         setContentView(R.layout.activity_main);
 
-        Log.d(TAG, "onCreate: request device policy manager");
         mDevicePolicyManager = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        Log.d(TAG, "onCreate: request device policy manager: " + mDevicePolicyManager);
-
-        // Set Default COSU policy
-        Log.d(TAG, "onCreate: take admin component name");
         mAdminComponentName = DeviceAdminReceiver.getComponentName(this);
-        Log.d(TAG, "onCreate: take admin component name: " + mAdminComponentName);
 
-        Log.d(TAG, "onCreate: am I a device owner app?");
+        //mDevicePolicyManager.clearDeviceOwnerApp(getPackageName());
+
         if (mDevicePolicyManager.isDeviceOwnerApp(getPackageName())) {
-            Log.d(TAG, "onCreate: set default cosu policies");
             setDefaultCosuPolicies(true);
         } else {
-            Log.d(TAG, "onCreate: not device owner");
             Toast.makeText(getApplicationContext(), R.string.not_device_owner, Toast.LENGTH_SHORT).show();
         }
-
-        Log.d(TAG, "onCreate: done");
     }
-
-    @Override
-    protected void onResume() {
-        Log.d(TAG, "onResume: ...");
-        super.onResume();
-        Log.d(TAG, "onResume: done");
-    }
-
 
     @Override
     protected void onStart() {
-        Log.d(TAG, "onStart: ...");
         super.onStart();
+        startLockTaskIfPossible();
+    }
 
+        @Override
+    protected void onResume() {
+        super.onResume();
+        hideSystemUI();
+    }
+
+    private void startLockTaskIfPossible() {
         // Start lock task mode if its not already active
         if (mDevicePolicyManager.isLockTaskPermitted(this.getPackageName())) {
             ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-            if (am.getLockTaskModeState() == ActivityManager.LOCK_TASK_MODE_NONE) {
+            final int lockTaskModeState = am.getLockTaskModeState();
+            Log.d(TAG, "startLockTaskIfPossible: current lock task mode state: " + lockTaskModeState);
+            if (lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) {
+                Log.d(TAG, "startLockTaskIfPossible: start lock task");
                 startLockTask();
             }
         }
-        Log.d(TAG, "onStart: done");
-    }
-
-    @Override
-    public void onBackPressed() {
-        // nothing to do here
-        // … really
-    }
-
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        Log.d(TAG, "onWindowFocusChanged: ...");
-        super.onWindowFocusChanged(hasFocus);
-        Log.d(TAG, "onWindowFocusChanged: done");
     }
 
     private void setDefaultCosuPolicies(boolean active) {
-        // Set user restrictions
-        Log.d(TAG, "setDefaultCosuPolicies: set user restrictions");
-        setUserRestriction(UserManager.DISALLOW_SAFE_BOOT, active);
-        setUserRestriction(UserManager.DISALLOW_FACTORY_RESET, active);
-        setUserRestriction(UserManager.DISALLOW_ADD_USER, active);
-        setUserRestriction(UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA, active);
-        setUserRestriction(UserManager.DISALLOW_ADJUST_VOLUME, active);
+        // set this Activity as a lock task package
+        Log.d(TAG, "setDefaultCosuPolicies: set this activity as a lock task package");
+        mDevicePolicyManager.setLockTaskPackages(mAdminComponentName, active ? new String[]{getPackageName()} : new String[]{});
 
         // Disable keyguard and status bar
         Log.d(TAG, "setDefaultCosuPolicies: disable keyguad and status bar");
@@ -104,50 +78,25 @@ public class MainActivity extends Activity {
         Log.d(TAG, "setDefaultCosuPolicies: enable stay on while plugged in");
         enableStayOnWhilePluggedIn(active);
 
-        // Set system update policy
-        Log.d(TAG, "setDefaultCosuPolicies: set system update policy");
-        if (active) {
-            mDevicePolicyManager.setSystemUpdatePolicy(mAdminComponentName,
-                    SystemUpdatePolicy.createWindowedInstallPolicy(60, 120));
-        } else {
-            mDevicePolicyManager.setSystemUpdatePolicy(mAdminComponentName,
-                    null);
-        }
-
-        // set this Activity as a lock task package
-        Log.d(TAG, "setDefaultCosuPolicies: set this activity as a lock task package");
-        mDevicePolicyManager.setLockTaskPackages(mAdminComponentName,
-                active ? new String[]{getPackageName()} : new String[]{});
-
         IntentFilter intentFilter = new IntentFilter(Intent.ACTION_MAIN);
         intentFilter.addCategory(Intent.CATEGORY_HOME);
         intentFilter.addCategory(Intent.CATEGORY_DEFAULT);
 
-        Log.d(TAG, "setDefaultCosuPolicies: check preferred activities");
+        // set Cosu activity as home intent receiver so that it is started on reboot
+        Log.d(TAG, "setDefaultCosuPolicies: set activity as home intent receiver so that it is started on reboot");
         if (active) {
-            // set Cosu activity as home intent receiver so that it is started on reboot
-            mDevicePolicyManager.addPersistentPreferredActivity(mAdminComponentName, intentFilter, new ComponentName(getPackageName(), MainActivity.class.getName()));
+            mDevicePolicyManager.addPersistentPreferredActivity(
+                    mAdminComponentName, intentFilter, new ComponentName(
+                            getPackageName(), MainActivity.class.getName()));
         } else {
-            mDevicePolicyManager.clearPackagePersistentPreferredActivities(mAdminComponentName, getPackageName());
+            mDevicePolicyManager.clearPackagePersistentPreferredActivities(
+                    mAdminComponentName, getPackageName());
         }
 
         Log.d(TAG, "setDefaultCosuPolicies: done");
     }
 
-    private void setUserRestriction(String restriction, boolean disallow) {
-        Log.d(TAG, String.format("setUserRestriction: %s, %b", restriction, disallow));
-        if (disallow) {
-            mDevicePolicyManager.addUserRestriction(mAdminComponentName,
-                    restriction);
-        } else {
-            mDevicePolicyManager.clearUserRestriction(mAdminComponentName,
-                    restriction);
-        }
-        Log.d(TAG, "setUserRestriction: done");
-    }
-
     private void enableStayOnWhilePluggedIn(boolean enabled) {
-        Log.d(TAG, "enableStayOnWhilePluggedIn: ... " + enabled);
         if (enabled) {
             mDevicePolicyManager.setGlobalSetting(
                     mAdminComponentName,
@@ -162,6 +111,19 @@ public class MainActivity extends Activity {
                     "0"
             );
         }
-        Log.d(TAG, "enableStayOnWhilePluggedIn: done");
+    }
+
+    // This snippet hides the system bars.
+    private void hideSystemUI() {
+        // Set the IMMERSIVE flag.
+        // Set the content to appear under the system bars so that the content
+        // doesn't resize when the system bars hide and show.
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION // hide nav bar
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN // hide status bar
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 }
