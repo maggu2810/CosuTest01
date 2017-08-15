@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">CosuTest01</string>
+    <string name="not_device_owner">Not Device Owner</string>
+</resources>
